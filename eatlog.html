@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>飲食紀錄工具（Firestore版）</title>
+  <script src="https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.3/firebase-firestore.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.3/firebase-auth.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    .section {
+      margin: 20px 0;
+      padding: 15px;
+      border-radius: 12px;
+      background: #f9fafb;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    }
+
+    .section h2 {
+      margin-bottom: 10px;
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: #333;
+      border-left: 4px solid #3b82f6;
+      padding-left: 8px;
+    }
+
+    .section ul {
+      max-height: 300px;
+      overflow-y: auto;
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .section ul li {
+      padding: 8px 10px;
+      margin: 6px 0;
+      border-radius: 8px;
+      background: white;
+      transition: background 0.2s;
+      cursor: pointer;
+    }
+
+    .section ul li:hover {
+      background: #f1f5f9;
+    }
+
+    /* 歷史紀錄專用：綠色邊條 */
+    #allSection h2 {
+      border-left-color: #10b981;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    /* 登入畫面樣式 */
+    .login-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+
+    .login-card {
+      background: white;
+      padding: 2rem;
+      border-radius: 1rem;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+      text-align: center;
+      max-width: 400px;
+      width: 90%;
+    }
+
+    .google-btn {
+      background: #4285f4;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin: 0 auto;
+    }
+
+    .google-btn:hover {
+      background: #3367d6;
+    }
+
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+      padding: 10px;
+      background: #f8fafc;
+      border-radius: 8px;
+    }
+
+    .user-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <!-- 登入畫面 -->
+  <div id="loginScreen" class="login-container">
+    <div class="login-card">
+      <h1 class="text-3xl font-bold mb-6 text-gray-800">🍱 飲食紀錄工具</h1>
+      <p class="text-gray-600 mb-6">請使用 Google 帳號登入來開始記錄您的飲食</p>
+      <button id="googleLoginBtn" class="google-btn">
+        <svg width="18" height="18" viewBox="0 0 24 24">
+          <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+          <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+          <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+        </svg>
+        使用 Google 登入
+      </button>
+    </div>
+  </div>
+
+  <!-- 主應用程式 -->
+  <div id="mainApp" class="hidden p-4">
+    <div class="max-w-3xl mx-auto bg-white shadow-lg rounded-2xl p-6">
+      <!-- 用戶資訊與登出 -->
+      <div class="user-info">
+        <img id="userAvatar" class="user-avatar" src="" alt="用戶頭像">
+        <div class="flex-1">
+          <p class="font-semibold" id="userName"></p>
+          <p class="text-sm text-gray-600" id="userEmail"></p>
+        </div>
+        <button id="logoutBtn" class="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600">登出</button>
+      </div>
+
+      <h1 class="text-2xl font-bold mb-4">🍱 飲食紀錄工具</h1>
+
+      <!-- 標籤切換 -->
+      <div class="mb-4">
+        <button id="tabToday" class="p-2 bg-blue-500 text-white rounded mr-2">今日紀錄</button>
+        <button id="tabAll" class="p-2 bg-gray-300 rounded">全部紀錄</button>
+      </div>
+
+      <!-- 輸入區 -->
+      <div class="flex flex-col md:flex-row gap-2 mb-6">
+        <input id="foodName" type="text" placeholder="餐點名稱" class="border p-2 rounded flex-1" />
+        <input id="calories" type="number" placeholder="熱量 (可空)" class="border p-2 rounded w-32" />
+        <select id="mealType" class="border p-2 rounded w-32">
+          <option value="早餐">早餐</option>
+          <option value="午餐">午餐</option>
+          <option value="晚餐">晚餐</option>
+          <option value="點心">點心</option>
+        </select>
+        <input id="tags" type="text" placeholder="標籤，逗號分隔" class="border p-2 rounded flex-1" />
+        <button id="addBtn" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">新增</button>
+      </div>
+
+      <!-- 本日紀錄 -->
+      <div id="todaySection" class="section">
+        <h2>今日紀錄</h2>
+        <ul id="mealList" class="divide-y mb-6"></ul>
+      </div>
+
+      <!-- 全部紀錄 -->
+      <div id="allSection" class="section hidden">
+        <h2>歷史紀錄</h2>
+        <ul id="allMealsList"></ul>
+      </div>
+
+      <!-- 統計區 -->
+      <h2 class="text-xl font-semibold mb-2">📊 熱量統計</h2>
+      <div class="grid md:grid-cols-2 gap-6">
+        <div class="p-4 border rounded-xl">
+          <h3 class="font-medium mb-2">今日總熱量</h3>
+          <p id="todayTotal" class="text-2xl font-bold text-blue-600">0 kcal</p>
+        </div>
+        <div class="p-4 border rounded-xl">
+          <h3 class="font-medium mb-2">本週日均熱量</h3>
+          <p id="weekAvg" class="text-2xl font-bold text-green-600">0 kcal</p>
+        </div>
+      </div>
+
+      <!-- 圖表 -->
+      <div class="mt-6">
+        <canvas id="weekChart" height="150"></canvas>
+      </div>
+
+      <!-- 複製按鈕 -->
+      <div class="mt-6 flex gap-4">
+        <button id="copyBtn" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">複製今日紀錄文字到剪貼簿</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 編輯彈窗 -->
+  <div id="editModal" class="fixed inset-0 bg-black bg-opacity-40 hidden justify-center items-center">
+    <div class="bg-white p-6 rounded-xl shadow-lg w-80">
+      <h3 class="text-lg font-bold mb-4">編輯餐點</h3>
+      <input id="modalFoodName" type="text" placeholder="餐點名稱" class="border p-2 rounded w-full mb-2" />
+      <input id="modalCalories" type="number" placeholder="熱量 (可空)" class="border p-2 rounded w-full mb-2" />
+      <select id="modalMealType" class="border p-2 rounded w-full mb-2">
+        <option value="早餐">早餐</option>
+        <option value="午餐">午餐</option>
+        <option value="晚餐">晚餐</option>
+        <option value="點心">點心</option>
+      </select>
+      <input id="modalTags" type="text" placeholder="標籤，逗號分隔" class="border p-2 rounded w-full mb-4" />
+      <div class="flex justify-end gap-2">
+        <button id="modalCancel" class="bg-gray-300 px-4 py-2 rounded hover:bg-gray-400">取消</button>
+        <button id="modalSave" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">保存</button>
+        <button id="deleteBtn" class="bg-red-500 text-white p-2 rounded">刪除</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-app.js";
+    import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, updateDoc, where } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-firestore.js";
+    import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.3/firebase-auth.js";
+
+    // Firebase 配置
+    const firebaseConfig = {
+      apiKey: "AIzaSyB0ySThqelTJ3X1WbbDygaQ80i0xkSjwJI",
+      authDomain: "eatlog-1997d.firebaseapp.com",
+      projectId: "eatlog-1997d",
+      storageBucket: "eatlog-1997d.firebasestorage.app",
+      messagingSenderId: "384046000154",
+      appId: "1:384046000154:web:c1de098c672a138be0c9a3",
+      measurementId: "G-3ZV9RR4MES"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+    const provider = new GoogleAuthProvider();
+
+    // DOM 元素
+    const loginScreen = document.getElementById("loginScreen");
+    const mainApp = document.getElementById("mainApp");
+    const googleLoginBtn = document.getElementById("googleLoginBtn");
+    const logoutBtn = document.getElementById("logoutBtn");
+    const userAvatar = document.getElementById("userAvatar");
+    const userName = document.getElementById("userName");
+    const userEmail = document.getElementById("userEmail");
+
+    const mealList = document.getElementById("mealList");
+    const allMealsList = document.getElementById("allMealsList");
+    const todayTotalEl = document.getElementById("todayTotal");
+    const weekAvgEl = document.getElementById("weekAvg");
+    const copyBtn = document.getElementById("copyBtn");
+
+    const tabToday = document.getElementById("tabToday");
+    const tabAll = document.getElementById("tabAll");
+    const todaySection = document.getElementById("todaySection");
+    const allSection = document.getElementById("allSection");
+
+    const editModal = document.getElementById("editModal");
+    const modalFoodName = document.getElementById("modalFoodName");
+    const modalCalories = document.getElementById("modalCalories");
+    const modalMealType = document.getElementById("modalMealType");
+    const modalTags = document.getElementById("modalTags");
+    const modalCancel = document.getElementById("modalCancel");
+    const modalSave = document.getElementById("modalSave");
+    const deleteBtn = document.getElementById("deleteBtn");
+
+    let allMeals = [];
+    let editId = null;
+    let currentUser = null;
+    let unsubscribeSnapshot = null;
+
+    // Google 登入
+    googleLoginBtn.addEventListener("click", async () => {
+      try {
+        const result = await signInWithPopup(auth, provider);
+        console.log("登入成功:", result.user);
+      } catch (error) {
+        console.error("登入失敗:", error);
+        alert("登入失敗，請重試");
+      }
+    });
+
+    // 登出
+    logoutBtn.addEventListener("click", async () => {
+      try {
+        await signOut(auth);
+        console.log("登出成功");
+      } catch (error) {
+        console.error("登出失敗:", error);
+      }
+    });
+
+    // 監聽驗證狀態變化
+    onAuthStateChanged(auth, (user) => {
+      if (user) {
+        currentUser = user;
+        showMainApp(user);
+        setupMealTracking();
+      } else {
+        currentUser = null;
+        showLoginScreen();
+        if (unsubscribeSnapshot) {
+          unsubscribeSnapshot();
+          unsubscribeSnapshot = null;
+        }
+      }
+    });
+
+    function showLoginScreen() {
+      loginScreen.classList.remove("hidden");
+      mainApp.classList.add("hidden");
+    }
+
+    function showMainApp(user) {
+      loginScreen.classList.add("hidden");
+      mainApp.classList.remove("hidden");
+
+      // 顯示用戶資訊
+      userAvatar.src = user.photoURL || 'https://via.placeholder.com/40';
+      userName.textContent = user.displayName || '匿名用戶';
+      userEmail.textContent = user.email || '';
+    }
+
+    function setupMealTracking() {
+      if (!currentUser) return;
+
+      const mealsRef = collection(db, "meals");
+      const userMealsQuery = query(
+        mealsRef,
+        where("userId", "==", currentUser.uid),
+        orderBy("createdAt")
+      );
+
+      // 監聽用戶的餐點資料
+      unsubscribeSnapshot = onSnapshot(userMealsQuery, (snapshot) => {
+        console.log(snapshot.docs);
+        mealList.innerHTML = "";
+        allMealsList.innerHTML = "";
+        allMeals = [];
+        const today = new Date().toDateString();
+        let todayTotal = 0;
+
+        // 收集所有餐點並在客戶端排序
+        const meals = [];
+        snapshot.forEach(docSnap => {
+          const meal = docSnap.data();
+          meal.id = docSnap.id;
+          meals.push(meal);
+        });
+
+        // 按創建時間排序
+        meals.sort((a, b) => {
+          const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt);
+          const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt);
+          return dateA - dateB;
+        });
+
+        meals.forEach(meal => {
+          allMeals.push(meal);
+          const createdAt = meal.createdAt?.toDate ? meal.createdAt.toDate() : new Date(meal.createdAt);
+          const dateKey = createdAt.toDateString();
+
+          // 今日紀錄
+          if (dateKey === today) {
+            const li = createMealListItem(meal, dateKey);
+            mealList.appendChild(li);
+            todayTotal += meal.calories || 0;
+          }
+
+          // 全部紀錄
+          const allLi = createMealListItem(meal, dateKey);
+          allMealsList.appendChild(allLi);
+        });
+
+        todayTotalEl.textContent = `${todayTotal} kcal`;
+        updateWeeklyStats();
+        updateChart();
+      });
+    }
+
+    function createMealListItem(meal, dateKey) {
+      const li = document.createElement("li");
+      li.className = "flex justify-between items-center p-2 cursor-pointer hover:bg-gray-50";
+      const tagsText = meal.tags && meal.tags.length ? ` [${meal.tags.join(", ")}]` : "";
+      const caloriesText = meal.calories ? ` (${meal.calories} kcal)` : "";
+      li.innerHTML = `${meal.mealType} - ${dateKey} - ${meal.name}${caloriesText}${tagsText}`;
+
+      li.addEventListener("click", () => {
+        editId = meal.id;
+        modalFoodName.value = meal.name;
+        modalCalories.value = meal.calories || '';
+        modalMealType.value = meal.mealType;
+        modalTags.value = meal.tags ? meal.tags.join(", ") : '';
+        editModal.classList.remove("hidden");
+      });
+
+      return li;
+    }
+
+    function updateWeeklyStats() {
+      const weekStart = new Date();
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+      let weekTotal = 0;
+      let dayCount = 0;
+
+      for (let i = 0; i < 7; i++) {
+        const date = new Date(weekStart);
+        date.setDate(date.getDate() + i);
+        const dateStr = date.toDateString();
+        const dayMeals = allMeals.filter(m => {
+          const mDate = m.createdAt?.toDate ? m.createdAt.toDate() : new Date(m.createdAt);
+          return mDate.toDateString() === dateStr;
+        });
+        if (dayMeals.length) {
+          weekTotal += dayMeals.reduce((acc, m) => acc + (m.calories || 0), 0);
+          dayCount++;
+        }
+      }
+      weekAvgEl.textContent = dayCount ? `${Math.round(weekTotal / dayCount)} kcal` : '0 kcal';
+    }
+
+    function updateChart() {
+      const weekStart = new Date();
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+      const chartLabels = [];
+      const chartData = [];
+
+      for (let i = 0; i < 7; i++) {
+        const date = new Date(weekStart);
+        date.setDate(date.getDate() + i);
+        const dateStr = date.toDateString();
+        chartLabels.push(dateStr.slice(4, 10));
+        const dayMeals = allMeals.filter(m => {
+          const mDate = m.createdAt?.toDate ? m.createdAt.toDate() : new Date(m.createdAt);
+          return mDate.toDateString() === dateStr;
+        });
+        chartData.push(dayMeals.reduce((acc, m) => acc + (m.calories || 0), 0));
+      }
+
+      if (window.weekChartInstance) {
+        window.weekChartInstance.data.labels = chartLabels;
+        window.weekChartInstance.data.datasets[0].data = chartData;
+        window.weekChartInstance.update();
+      } else {
+        const ctx = document.getElementById('weekChart').getContext('2d');
+        window.weekChartInstance = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: chartLabels,
+            datasets: [{
+              label: '每日熱量',
+              data: chartData,
+              backgroundColor: 'rgba(54, 162, 235, 0.6)'
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } }
+          }
+        });
+      }
+    }
+
+    // 新增餐點
+    document.getElementById("addBtn").addEventListener("click", async () => {
+      if (!currentUser) return;
+
+      const name = document.getElementById("foodName").value.trim();
+      if (!name) return alert("請輸入餐點名稱");
+
+      const calories = document.getElementById("calories").value;
+      const mealType = document.getElementById("mealType").value;
+      const tags = document.getElementById("tags").value.split(",").map(t => t.trim()).filter(t => t);
+
+      try {
+        await addDoc(collection(db, "meals"), {
+          name,
+          calories: calories ? Number(calories) : null,
+          mealType,
+          tags,
+          userId: currentUser.uid,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+
+        // 清空輸入欄位
+        document.getElementById("foodName").value = "";
+        document.getElementById("calories").value = "";
+        document.getElementById("tags").value = "";
+      } catch (error) {
+        console.error("新增餐點失敗:", error);
+        alert("新增餐點失敗，請重試");
+      }
+    });
+
+    // 標籤切換
+    tabToday.addEventListener("click", () => {
+      todaySection.classList.remove("hidden");
+      allSection.classList.add("hidden");
+      tabToday.classList.add("bg-blue-500", "text-white");
+      tabToday.classList.remove("bg-gray-300");
+      tabAll.classList.add("bg-gray-300");
+      tabAll.classList.remove("bg-blue-500", "text-white");
+    });
+
+    tabAll.addEventListener("click", () => {
+      allSection.classList.remove("hidden");
+      todaySection.classList.add("hidden");
+      tabAll.classList.add("bg-blue-500", "text-white");
+      tabAll.classList.remove("bg-gray-300");
+      tabToday.classList.add("bg-gray-300");
+      tabToday.classList.remove("bg-blue-500", "text-white");
+    });
+
+    // 編輯彈窗事件
+    modalCancel.addEventListener("click", () => {
+      editModal.classList.add("hidden");
+      editId = null;
+    });
+
+    modalSave.addEventListener("click", async () => {
+      if (!currentUser || !editId) return;
+      if (!modalFoodName.value.trim()) return alert("請輸入餐點名稱");
+
+      const mealData = {
+        name: modalFoodName.value,
+        calories: modalCalories.value ? Number(modalCalories.value) : null,
+        mealType: modalMealType.value,
+        tags: modalTags.value.split(",").map(t => t.trim()).filter(t => t),
+        updatedAt: new Date()
+      };
+
+      try {
+        await updateDoc(doc(db, "meals", editId), mealData);
+        editModal.classList.add("hidden");
+        editId = null;
+      } catch (error) {
+        console.error("更新餐點失敗:", error);
+        alert("更新餐點失敗，請重試");
+      }
+    });
+
+    deleteBtn.addEventListener("click", async () => {
+      if (!currentUser || !editId) return;
+      if (confirm("確定要刪除這筆紀錄嗎？")) {
+        try {
+          await deleteDoc(doc(db, "meals", editId));
+          editModal.classList.add("hidden");
+          editId = null;
+        } catch (error) {
+          console.error("刪除餐點失敗:", error);
+          alert("刪除餐點失敗，請重試");
+        }
+      }
+    });
+
+    // 複製今日紀錄
+    copyBtn.addEventListener("click", () => {
+      if (!currentUser) return;
+
+      const today = new Date().toDateString();
+      const textLines = allMeals.filter(m => {
+        const mDate = m.createdAt?.toDate ? m.createdAt.toDate() : new Date(m.createdAt);
+        return mDate.toDateString() === today;
+      }).map(m => {
+        const caloriesText = m.calories ? ` (${m.calories} kcal)` : '';
+        const tagsText = m.tags && m.tags.length ? ` [${m.tags.join(", ")}]` : '';
+        return `${m.mealType} - ${m.name}${caloriesText}${tagsText}`;
+      });
+
+      if (textLines.length === 0) {
+        alert("今日沒有紀錄可複製");
+        return;
+      }
+
+      navigator.clipboard.writeText(textLines.join('\n')).then(() => {
+        alert('今日紀錄已複製到剪貼簿');
+      }).catch(() => {
+        alert('複製失敗，請手動選取文字複製');
+      });
+    });
+
+    // Enter 鍵快速新增
+    document.getElementById("foodName").addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
+        document.getElementById("addBtn").click();
+      }
+    });
+  </script>
+</body>
+</html>
