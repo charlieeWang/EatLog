@@ -166,6 +166,19 @@
         <button id="addBtn" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">新增</button>
       </div>
 
+      <!-- 自訂日期時間 -->
+      <div class="flex flex-col md:flex-row gap-2">
+        <label class="flex items-center gap-2">
+          <input id="useCustomAt" type="checkbox" class="w-4 h-4">
+          <span>使用自訂日期時間</span>
+        </label>
+        <input id="customAt" type="datetime-local" class="border p-2 rounded md:w-72" disabled />
+        <div class="flex items-center gap-2 text-sm text-gray-600">
+          <button id="quickYesterday" type="button" class="px-2 py-1 border rounded">昨天</button>
+          <button id="quickTwoDays" type="button" class="px-2 py-1 border rounded">前天</button>
+        </div>
+      </div>
+
       <!-- 本日紀錄 -->
       <div id="todaySection" class="section">
         <h2>今日紀錄</h2>
@@ -216,6 +229,7 @@
         <option value="點心">點心</option>
       </select>
       <input id="modalTags" type="text" placeholder="標籤，逗號分隔" class="border p-2 rounded w-full mb-4" />
+      <input id="modalCreatedAt" type="datetime-local" class="border p-2 rounded w-full mb-4" />
       <div class="flex justify-end gap-2">
         <button id="modalCancel" class="bg-gray-300 px-4 py-2 rounded hover:bg-gray-400">取消</button>
         <button id="modalSave" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">保存</button>
@@ -269,6 +283,16 @@
     const modalFoodName = document.getElementById("modalFoodName");
     const modalCalories = document.getElementById("modalCalories");
     const modalMealType = document.getElementById("modalMealType");
+
+    // 自訂日期（新增用）
+    const useCustomAt = document.getElementById("useCustomAt");
+    const customAt = document.getElementById("customAt");
+    const quickYesterday = document.getElementById("quickYesterday");
+    const quickTwoDays = document.getElementById("quickTwoDays");
+
+    // 自訂日期（編輯用）
+    const modalCreatedAt = document.getElementById("modalCreatedAt");
+
     const modalTags = document.getElementById("modalTags");
     const modalCancel = document.getElementById("modalCancel");
     const modalSave = document.getElementById("modalSave");
@@ -330,6 +354,24 @@
       userName.textContent = user.displayName || '匿名用戶';
       userEmail.textContent = user.email || '';
     }
+
+    // 將 Date 轉成 datetime-local 需要的「本地時區」字串（YYYY-MM-DDTHH:mm）
+    function toLocalDatetimeInputValue(date) {
+      const pad = (n) => String(n).padStart(2, '0');
+      const y = date.getFullYear();
+      const m = pad(date.getMonth() + 1);
+      const d = pad(date.getDate());
+      const hh = pad(date.getHours());
+      const mm = pad(date.getMinutes());
+      return `${y}-${m}-${d}T${hh}:${mm}`;
+    }
+
+    // 從 datetime-local 讀到的字串（視為本地時間）轉成 Date
+    function fromLocalDatetimeInputValue(str) {
+      // 'YYYY-MM-DDTHH:mm' -> 本地時間
+      return new Date(str);
+    }
+
 
     function setupMealTracking() {
       if (!currentUser) return;
@@ -396,6 +438,8 @@
       li.innerHTML = `${meal.mealType} - ${dateKey} - ${meal.name}${caloriesText}${tagsText}`;
 
       li.addEventListener("click", () => {
+        const createdAt = meal.createdAt?.toDate ? meal.createdAt.toDate() : new Date(meal.createdAt);
+        modalCreatedAt.value = toLocalDatetimeInputValue(createdAt);
         editId = meal.id;
         modalFoodName.value = meal.name;
         modalCalories.value = meal.calories || '';
@@ -482,6 +526,14 @@
       const mealType = document.getElementById("mealType").value;
       const tags = document.getElementById("tags").value.split(",").map(t => t.trim()).filter(t => t);
 
+      // 決定 createdAt
+      let createdAt = new Date();
+      if (useCustomAt.checked && customAt.value) {
+        const d = fromLocalDatetimeInputValue(customAt.value);
+        if (isNaN(d.getTime())) return alert("自訂日期時間格式不正確");
+        createdAt = d;
+      }
+
       try {
         await addDoc(collection(db, "meals"), {
           name,
@@ -489,14 +541,18 @@
           mealType,
           tags,
           userId: currentUser.uid,
-          createdAt: new Date(),
+          createdAt,
           updatedAt: new Date(),
+          createdAtSrc: useCustomAt.checked ? "manual" : "now", // 可選：追蹤來源
         });
 
         // 清空輸入欄位
         document.getElementById("foodName").value = "";
         document.getElementById("calories").value = "";
         document.getElementById("tags").value = "";
+        customAt.value = "";
+        useCustomAt.checked = false;
+        customAt.disabled = true;
       } catch (error) {
         console.error("新增餐點失敗:", error);
         alert("新增餐點失敗，請重試");
@@ -532,6 +588,14 @@
       if (!currentUser || !editId) return;
       if (!modalFoodName.value.trim()) return alert("請輸入餐點名稱");
 
+      // 讀取並驗證編輯的 createdAt
+      let editedCreatedAt = null;
+      if (modalCreatedAt.value) {
+        const d = fromLocalDatetimeInputValue(modalCreatedAt.value);
+        if (isNaN(d.getTime())) return alert("日期時間格式不正確");
+        editedCreatedAt = d;
+      }
+
       const mealData = {
         name: modalFoodName.value,
         calories: modalCalories.value ? Number(modalCalories.value) : null,
@@ -539,6 +603,8 @@
         tags: modalTags.value.split(",").map(t => t.trim()).filter(t => t),
         updatedAt: new Date()
       };
+
+      if (editedCreatedAt) mealData.createdAt = editedCreatedAt; // 套用手動日期
 
       try {
         await updateDoc(doc(db, "meals", editId), mealData);
@@ -596,6 +662,28 @@
         document.getElementById("addBtn").click();
       }
     });
+
+    useCustomAt.addEventListener("change", () => {
+      customAt.disabled = !useCustomAt.checked;
+      if (!useCustomAt.checked) customAt.value = "";
+    });
+
+    quickYesterday.addEventListener("click", () => {
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      customAt.value = toLocalDatetimeInputValue(d);
+      useCustomAt.checked = true;
+      customAt.disabled = false;
+    });
+
+    quickTwoDays.addEventListener("click", () => {
+      const d = new Date();
+      d.setDate(d.getDate() - 2);
+      customAt.value = toLocalDatetimeInputValue(d);
+      useCustomAt.checked = true;
+      customAt.disabled = false;
+    });
+
   </script>
 </body>
 </html>
